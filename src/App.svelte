@@ -5,6 +5,7 @@
   import { bboxOf, padBbox, ringAreaM2 } from './lib/geo.js';
   import { toGpx, download } from './lib/gpx.js';
   import { REGION_COLORS, routeColor } from './lib/palette.js';
+  import { miles, kms, feet, meters, dist, short, area, minutes, hm } from './lib/units.js';
   import { pack, unpack, walkerPayload, setupPayload, setupFromPayload, shareUrl, readHash, sendLink } from './lib/share.js';
 
   const STORE = 'walkabout:project:v1';
@@ -161,12 +162,6 @@
     selectedRegion = -1;
   }
 
-  const km = (m) => (m / 1000).toFixed(m < 10000 ? 2 : 1);
-  const ft = (m) => Math.round(m * 3.28084);
-  const mi = (m) => (m / 1609.344).toFixed(2);
-  // Rough time: door-to-door at 2.5 km/h, walking between at 4.5 km/h, +1 min per 10 m climbed.
-  const minutes = (w) => Math.round(((w.work / 2500) + ((w.length - w.work) / 4500)) * 60 + w.up / 10);
-  const hm = (min) => (min >= 60 ? `${Math.floor(min / 60)} h ${min % 60} min` : `${min} min`);
   const label = (i) => `Walker ${i + 1}`;
 
   async function getGraph(signal) {
@@ -396,7 +391,7 @@
             <li class:sel={selectedRegion === i}>
               <span class="swatch" style:background={r.color}></span>
               <input class="name" bind:value={r.name} aria-label="Region name" />
-              <span class="meta">{(ringAreaM2(r.ring) / 1e6).toFixed(2)} km²</span>
+              <span class="meta">{area(ringAreaM2(r.ring))}</span>
               <button class="icon" title="Edit corners on the map" onclick={() => (selectedRegion = selectedRegion === i ? -1 : i)}>✎</button>
               <button class="icon" title="Delete region" onclick={() => removeRegion(i)}>✕</button>
             </li>
@@ -442,7 +437,7 @@
         <label class="check"><input type="checkbox" bind:checked={p.useElevation} /> Balance hills as well as distance</label>
         {#if p.useElevation}
           <label class="field">
-            <span>1 m of climb counts as <strong>{p.climbWeight} m</strong> of walking</span>
+            <span>1 ft of climb counts as <strong>{p.climbWeight} ft</strong> of walking</span>
             <input type="range" min="0" max="20" step="1" bind:value={p.climbWeight} />
           </label>
         {/if}
@@ -494,7 +489,7 @@
           {#each result.warnings as w}<p class="warn">{w}</p>{/each}
           {#if result.walkers.length}
             <p class="summary">
-              {result.walkers.length} routes · {km(result.stats.totalWork)} km of canvassing ·
+              {result.walkers.length} routes · {dist(result.stats.totalWork)} of canvassing ·
               hardest and easiest differ by <strong>{(spread * 100).toFixed(1)}%</strong>
             </p>
             <div class="row">
@@ -513,8 +508,8 @@
                   <div class="whead">
                     <button class="swatch big" style:background={routeColor(i)} title={hidden.includes(i) ? 'Show on map' : 'Hide on map'} onclick={() => toggleHidden(i)}>{i + 1}</button>
                     <div class="wstats">
-                      <strong>{km(w.length)} km</strong> <span>({mi(w.length)} mi)</span>
-                      <span>↑{Math.round(w.up)} m ↓{Math.round(w.down)} m</span>
+                      <strong>{miles(w.length)}</strong> <span>({kms(w.length)})</span>
+                      <span>↑{feet(w.up)} ↓{feet(w.down)} ({meters(w.up)} / {meters(w.down)})</span>
                       <span>≈ {hm(minutes(w))}</span>
                     </div>
                     <button class="icon" title="Send this walker a link to their route" onclick={() => shareWalker(w, i)}>🔗</button>
@@ -529,7 +524,7 @@
                           {#if s.kind === 'work'}<strong>{s.name || 'Unnamed street'}</strong>{#if s.side}&nbsp;· {s.side} side{/if}
                           {:else if s.kind === 'walk'}Walk via {s.name || 'path'}
                           {:else}Cut across (no mapped path){/if}
-                          <span>{Math.round(s.meters)} m</span>
+                          <span>{short(s.meters)}</span>
                         </li>
                       {/each}
                     </ol>
@@ -588,7 +583,7 @@
       <article class="sheet">
         <h1><span class="swatch big" style:background={routeColor(i)}>{i + 1}</span> {p.title || 'Walkabout'} · {w.label}</h1>
         <p>
-          {km(w.length)} km ({mi(w.length)} mi) · climb {Math.round(w.up)} m ({ft(w.up)} ft) · about {hm(minutes(w))}
+          {dist(w.length)} · climb {short(w.up)} · about {hm(minutes(w))}
           {#if w.start}<br />Start: {w.start[0].toFixed(5)}, {w.start[1].toFixed(5)}{/if}
           {#if w.end}· End: {w.end[0].toFixed(5)}, {w.end[1].toFixed(5)}{/if}
         </p>
@@ -598,7 +593,7 @@
               {#if s.kind === 'work'}☐ <strong>{s.name || 'Unnamed street'}</strong> — {s.side ? `${s.side} side` : 'both sides'}
               {:else if s.kind === 'walk'}Walk via {s.name || 'path'}
               {:else}Cut across (no mapped path){/if}
-              <span>{Math.round(s.meters)} m</span>
+              <span>{short(s.meters)}</span>
             </li>
           {/each}
         </ol>

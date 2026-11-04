@@ -5,6 +5,7 @@
   import { toGpx, download } from './lib/gpx.js';
   import { routeColor } from './lib/palette.js';
   import { unpack, walkerFromPayload } from './lib/share.js';
+  import { miles, kms, dist, short, minutes, hm } from './lib/units.js';
 
   let { data } = $props();
 
@@ -46,11 +47,6 @@
   const work = $derived(w ? w.streets.map((s, i) => [s, i]).filter(([s]) => s.kind === 'work') : []);
   const doneCount = $derived(work.filter(([, i]) => done.includes(i)).length);
 
-  const km = (m) => (m / 1000).toFixed(m < 10000 ? 2 : 1);
-  const mi = (m) => (m / 1609.344).toFixed(2);
-  const ft = (m) => Math.round(m * 3.28084);
-  const minutes = (w) => Math.round((w.work / 2500 + (w.length - w.work) / 4500) * 60 + w.up / 10);
-  const hm = (min) => (min >= 60 ? `${Math.floor(min / 60)} h ${min % 60} min` : `${min} min`);
 
   function toggleDone(i) {
     done = done.includes(i) ? done.filter((x) => x !== i) : [...done, i];
@@ -112,8 +108,8 @@
           <div class="whead">
             <span class="swatch big" style:background={w.color}>{route.index + 1}</span>
             <div class="wstats">
-              <strong>{km(w.length)} km</strong> <span>({mi(w.length)} mi)</span>
-              <span>↑{w.up} m ({ft(w.up)} ft)</span>
+              <strong>{miles(w.length)}</strong> <span>({kms(w.length)})</span>
+              <span>↑{short(w.up)}</span>
               <span>≈ {hm(minutes(w))}</span>
             </div>
           </div>
@@ -135,11 +131,11 @@
                   <label>
                     <input type="checkbox" checked={done.includes(i)} onchange={() => toggleDone(i)} />
                     <span class="what"><strong>{s.name || 'Unnamed street'}</strong>, {s.side ? `${s.side} side` : 'both sides'}</span>
-                    <span>{Math.round(s.meters)} m</span>
+                    <span>{short(s.meters)}</span>
                   </label>
                 {:else}
                   <span class="what">{s.kind === 'walk' ? `Walk via ${s.name || 'path'}` : 'Cut across (no mapped path)'}</span>
-                  <span>{Math.round(s.meters)} m</span>
+                  <span>{short(s.meters)}</span>
                 {/if}
               </li>
             {/each}
@@ -171,14 +167,14 @@
   <div class="print-sheets">
     <article class="sheet">
       <h1><span class="swatch big" style:background={w.color}>{route.index + 1}</span> {route.title || 'Walkabout'} · {w.label}</h1>
-      <p>{km(w.length)} km ({mi(w.length)} mi) · climb {w.up} m ({ft(w.up)} ft) · about {hm(minutes(w))}</p>
+      <p>{dist(w.length)} · climb {short(w.up)} · about {hm(minutes(w))}</p>
       <ol class="streets">
         {#each w.streets as s}
           <li class={s.kind}>
             {#if s.kind === 'work'}☐ <strong>{s.name || 'Unnamed street'}</strong>, {s.side ? `${s.side} side` : 'both sides'}
             {:else if s.kind === 'walk'}Walk via {s.name || 'path'}
             {:else}Cut across (no mapped path){/if}
-            <span>{Math.round(s.meters)} m</span>
+            <span>{short(s.meters)}</span>
           </li>
         {/each}
       </ol>
