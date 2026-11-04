@@ -60,6 +60,19 @@
   let hidden = $state([]);
   let focusWalker = $state(-1);
   let openWalker = $state(-1);
+  // Highlighted step { w, k, from: 'list' | 'map' }, shared by the street lists and the map.
+  let hl = $state(null);
+  let mapView;
+  function pickStep(w, k) {
+    if (k < 0) return;
+    openWalker = w;
+    hl = { w, k, from: 'map' };
+  }
+  $effect(() => {
+    if (hl?.from !== 'map') return;
+    const { w, k } = hl;
+    requestAnimationFrame(() => document.querySelector(`.walkers [data-step="${w}-${k}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+  });
   let fitKey = $state(0);
   let focus = $state(null);
   let search = $state('');
@@ -521,7 +534,15 @@
                   {#if openWalker === i}
                     <ol class="streets">
                       {#each w.streets as s, k}
-                        <li class={s.kind}>
+                        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+                        <li
+                          class={s.kind}
+                          class:hl={hl?.w === i && hl?.k === k}
+                          data-step="{i}-{k}"
+                          onmouseenter={() => (hl = { w: i, k, from: 'list' })}
+                          onmouseleave={() => (hl = null)}
+                          onclick={() => mapView?.showStep(i, k)}
+                        >
                           <Step {s} prev={w.streets[k - 1]} />
                           <span>{short(s.meters)}</span>
                         </li>
@@ -554,6 +575,10 @@
 
   <main class="mapcol">
     <MapView
+      bind:this={mapView}
+      highlight={hl}
+      onHoverStep={(w, k) => (hl = k >= 0 ? { w, k, from: 'map' } : null)}
+      onPickStep={pickStep}
       {mode}
       regions={p.regions}
       starts={p.starts}

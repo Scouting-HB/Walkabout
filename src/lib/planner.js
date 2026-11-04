@@ -608,9 +608,17 @@ function planOnce(graph, opts = {}, onProgress = () => {}) {
           offset = (s.side === 0) === (s.dir === 0) ? 1 : -1;
         }
       }
+      // seg: where this step sits in `pieces` ([piece, first vertex, last vertex]), for highlighting.
       const last = pieces[pieces.length - 1];
-      if (last && last.kind === kind && last.offset === offset) last.coords.push(...coords.slice(1));
-      else pieces.push({ kind, offset, coords: [...coords] });
+      let seg;
+      if (last && last.kind === kind && last.offset === offset) {
+        seg = [pieces.length - 1, last.coords.length - 1];
+        last.coords.push(...coords.slice(1));
+      } else {
+        seg = [pieces.length, 0];
+        pieces.push({ kind, offset, coords: [...coords] });
+      }
+      seg.push(pieces[seg[0]].coords.length - 1);
 
       let move = null;
       if (kind !== 'gap' && prev) {
@@ -628,10 +636,11 @@ function planOnce(graph, opts = {}, onProgress = () => {}) {
       // A new line starts on a new street, or when the walker turns back onto the other side of the same block.
       if (ls && ls.kind === kind && ls.name === name && ls.offset === offset && s.e !== ls.lastE) {
         ls.meters += meters; ls.climb += climb; ls.lastE = s.e; ls.coords.push(...coords.slice(1));
+        ls.seg[2] = seg[2];
         if (move) ls.crossing.push(...move.cross);
       } else {
         streets.push({
-          kind, name, meters, climb, offset, lastE: s.e, coords: [...coords],
+          kind, name, meters, climb, offset, lastE: s.e, coords: [...coords], seg,
           turn: move ? move.turn : 'start',
           heading: move || kind === 'gap' ? undefined : compass(bearing(coords[0], pointAlong(coords, 30))),
           crossBefore: move ? move.cross : [],

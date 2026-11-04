@@ -17,6 +17,14 @@
   let locError = $state('');
   let fitKey = $state(0);
   let watchId = null;
+  let mapView;
+  let hl = $state(-1); // highlighted step
+  let hlFrom = 'list';
+  $effect(() => {
+    if (hl < 0 || hlFrom !== 'map') return;
+    const k = hl;
+    requestAnimationFrame(() => document.querySelector(`.checklist [data-step="${k}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+  });
 
   // Ticked-off streets are remembered on this phone, per link.
   const doneKey = `walkabout:done:${hash(data)}`;
@@ -127,17 +135,21 @@
           <h2>Streets <small>{doneCount} of {work.length} done</small></h2>
           <ol class="streets checklist">
             {#each w.streets as s, i}
-              <li class={s.kind} class:done={done.includes(i)}>
+              <li
+                class={s.kind}
+                class:done={done.includes(i)}
+                class:hl={hl === i}
+                data-step={i}
+                onmouseenter={() => (hl = i, (hlFrom = 'list'))}
+                onmouseleave={() => (hl = -1)}
+              >
                 {#if s.kind === 'work'}
-                  <label>
-                    <input type="checkbox" checked={done.includes(i)} onchange={() => toggleDone(i)} />
-                    <span class="what"><Step {s} prev={w.streets[i - 1]} /></span>
-                    <span>{short(s.meters)}</span>
-                  </label>
-                {:else}
-                  <span class="what"><Step {s} prev={w.streets[i - 1]} /></span>
-                  <span>{short(s.meters)}</span>
+                  <input type="checkbox" checked={done.includes(i)} onchange={() => toggleDone(i)} aria-label="Done" />
                 {/if}
+                <button class="what" onclick={() => { hl = i; hlFrom = 'list'; mapView?.showStep(0, i); }} title="Show on the map">
+                  <Step {s} prev={w.streets[i - 1]} />
+                </button>
+                <span class="len">{short(s.meters)}</span>
               </li>
             {/each}
           </ol>
@@ -153,6 +165,10 @@
 
   <main class="mapcol">
     <MapView
+      bind:this={mapView}
+      highlight={hl >= 0 ? { w: 0, k: hl } : null}
+      onHoverStep={(_, k) => { hl = k; hlFrom = 'map'; }}
+      onPickStep={(_, k) => { hl = k; hlFrom = 'map'; }}
       walkers={w ? [w] : []}
       starts={w?.start ? [w.start] : []}
       ends={w?.end ? [w.end] : []}
@@ -185,10 +201,11 @@
   .actions { margin-top: 10px; }
   .checklist { padding-left: 0; list-style: none; font-size: 0.92rem; }
   .checklist li { padding: 5px 0; border-bottom: 1px solid var(--line); display: flex; gap: 6px; align-items: baseline; }
-  .checklist label { display: flex; gap: 8px; align-items: baseline; flex: 1; cursor: pointer; }
-  .checklist input { transform: scale(1.3); }
-  .checklist .what { flex: 1; }
-  .checklist li.walk, .checklist li.gap { padding-left: 26px; }
+  .checklist input { transform: scale(1.3); margin: 0 4px; }
+  .checklist .what { flex: 1; background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+  .checklist .len { color: var(--muted); white-space: nowrap; }
+  .checklist li { padding-left: 4px; padding-right: 4px; border-radius: 4px; }
+  .checklist li.walk, .checklist li.gap { padding-left: 30px; }
   .checklist li.done .what { text-decoration: line-through; color: var(--muted); }
   h2 small { font-weight: 400; color: var(--muted); font-size: 0.8rem; margin-left: 6px; }
 </style>

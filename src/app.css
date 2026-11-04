@@ -111,6 +111,8 @@ details summary { cursor: pointer; font-size: 0.88rem; color: var(--cub-blue); m
 .streets li { margin: 2px 0; }
 .streets li span { color: var(--muted); margin-left: 4px; }
 .streets li.walk, .streets li.gap { color: var(--muted); font-style: italic; }
+.walkers .streets li { cursor: pointer; border-radius: 4px; padding: 1px 4px; margin-left: -4px; }
+.streets li.hl, .checklist li.hl { background: #fff1b8; box-shadow: inset 3px 0 0 var(--cub-yellow); }
 
 .seg { display: flex; flex-wrap: wrap; gap: 4px; }
 .types { width: 100%; border-collapse: collapse; font-size: 0.84rem; margin: 6px 0; }
