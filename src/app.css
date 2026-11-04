@@ -112,6 +112,12 @@ details summary { cursor: pointer; font-size: 0.88rem; color: var(--cub-blue); m
 .streets li span { color: var(--muted); margin-left: 4px; }
 .streets li.walk, .streets li.gap { color: var(--muted); font-style: italic; }
 
+.seg { display: flex; flex-wrap: wrap; gap: 4px; }
+.types { width: 100%; border-collapse: collapse; font-size: 0.84rem; margin: 6px 0; }
+.types th { font-weight: 600; text-align: center; color: var(--muted); font-size: 0.75rem; padding: 2px 4px; }
+.types th:first-child, .types td:first-child { text-align: left; }
+.types td { padding: 3px 4px; border-top: 1px solid var(--line); text-align: center; }
+
 .print-sheets { display: none; }
 
 @media (max-width: 760px) {

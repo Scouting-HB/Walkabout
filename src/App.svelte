@@ -1,6 +1,6 @@
 <script>
   import MapView from './lib/MapView.svelte';
-  import { fetchOsm, buildGraph, STREET_TYPES } from './lib/osm.js';
+  import { fetchOsm, buildGraph, STREET_TYPES, BUSY_TYPES } from './lib/osm.js';
   import { addElevations, clearElevations } from './lib/elevation.js';
   import { bboxOf, padBbox, ringAreaM2 } from './lib/geo.js';
   import { toGpx, download } from './lib/gpx.js';
@@ -16,14 +16,16 @@
     walkers: 4,
     climbWeight: 8,
     countTravel: true,
-    bothSidesBusy: false,
+    sideTypes: [...BUSY_TYPES],
     useElevation: true,
     coverTypes: STREET_TYPES.filter((t) => t.default).map((t) => t.key),
     title: '',
   };
   function load() {
     try {
-      return { ...defaults, ...JSON.parse(localStorage.getItem(STORE) ?? '{}') };
+      const saved = JSON.parse(localStorage.getItem(STORE) ?? '{}');
+      delete saved.bothSidesBusy; // replaced by sideTypes
+      return { ...defaults, ...saved };
     } catch {
       return { ...defaults };
     }
@@ -66,13 +68,20 @@
   let graphCache = { key: '', graph: null, elevated: false };
   let osmCache = { key: '', data: null };
 
-  const graphKey = $derived(JSON.stringify([p.regions.map((r) => r.ring), [...p.coverTypes].sort(), p.bothSidesBusy]));
+  const graphKey = $derived(JSON.stringify([p.regions.map((r) => r.ring), [...p.coverTypes].sort(), [...p.sideTypes].sort()]));
   $effect(() => {
     graphKey;
     // Regions or street types changed: the old plan no longer matches.
     if (result && result.key !== graphKey) { result = null; preview = []; }
   });
 
+  const sideMode = $derived.by(() => {
+    const set = new Set(p.sideTypes);
+    if (!set.size) return 'none';
+    if (STREET_TYPES.every((t) => set.has(t.key))) return 'all';
+    if (set.size === BUSY_TYPES.length && BUSY_TYPES.every((t) => set.has(t))) return 'busy';
+    return 'custom';
+  });
   const walkerCount = $derived(Math.max(1, Math.min(60, Math.round(+p.walkers || 1))));
 
   function addRegion(ring) {
@@ -111,7 +120,7 @@
       osmCache = { key: okey, data: await fetchOsm(bbox, { signal, onStatus: (s) => (status = s) }) };
     }
     status = 'Building street network…';
-    const graph = buildGraph(osmCache.data, p.regions, { coverTypes: new Set(p.coverTypes), bothSidesBusy: p.bothSidesBusy });
+    const graph = buildGraph(osmCache.data, p.regions, { coverTypes: new Set(p.coverTypes), sideTypes: new Set(p.sideTypes) });
     graphCache = { key: graphKey, graph, elevated: false };
     return graph;
   }
@@ -380,18 +389,34 @@
             <input type="range" min="0" max="20" step="1" bind:value={p.climbWeight} />
           </label>
         {/if}
+        <div class="field">
+          <span>Sides of the street</span>
+          <div class="seg" role="group" aria-label="Which streets are walked one side at a time">
+            <button class="btn small" class:primary={sideMode === 'none'} onclick={() => (p.sideTypes = [])}>Criss-cross all</button>
+            <button class="btn small" class:primary={sideMode === 'busy'} onclick={() => (p.sideTypes = [...BUSY_TYPES])}>Busy roads two-sided</button>
+            <button class="btn small" class:primary={sideMode === 'all'} onclick={() => (p.sideTypes = STREET_TYPES.map((t) => t.key))}>All two-sided</button>
+          </div>
+          <span class="hint">
+            Criss-cross streets are covered both sides in one pass. Two-sided streets are walked one side at a time,
+            and each side can go to a different walker; a walker with both goes down one side and back the other.
+            {#if sideMode === 'custom'}(Custom mix, see More options.){/if}
+          </span>
+        </div>
         <details>
           <summary>More options</summary>
           <label class="check"><input type="checkbox" bind:checked={p.countTravel} /> Count walking to, between and from streets when balancing</label>
-          <label class="check"><input type="checkbox" bind:checked={p.bothSidesBusy} /> Walk each side of busier roads separately</label>
-          <fieldset>
-            <legend>Streets to cover</legend>
-            {#each STREET_TYPES as t}
-              <label class="check">
-                <input type="checkbox" value={t.key} bind:group={p.coverTypes} /> {t.label}
-              </label>
-            {/each}
-          </fieldset>
+          <table class="types">
+            <thead><tr><th>Street type</th><th>Cover</th><th title="Each side is its own pass, which can go to a different walker">Sides separately</th></tr></thead>
+            <tbody>
+              {#each STREET_TYPES as t}
+                <tr>
+                  <td>{t.label}</td>
+                  <td><input type="checkbox" value={t.key} bind:group={p.coverTypes} aria-label="Cover {t.label}" /></td>
+                  <td><input type="checkbox" value={t.key} bind:group={p.sideTypes} aria-label="Walk each side of {t.label} separately" /></td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
         </details>
       </section>
 
@@ -412,7 +437,7 @@
           {#each result.warnings as w}<p class="warn">{w}</p>{/each}
           {#if result.walkers.length}
             <p class="summary">
-              {result.walkers.length} routes · {km(result.stats.totalWork)} km of streets to canvass ·
+              {result.walkers.length} routes · {km(result.stats.totalWork)} km of canvassing ·
               hardest and easiest differ by <strong>{(spread * 100).toFixed(1)}%</strong>
             </p>
             <div class="row">
@@ -442,7 +467,7 @@
                     <ol class="streets">
                       {#each w.streets as s}
                         <li class={s.kind}>
-                          {#if s.kind === 'work'}<strong>{s.name || 'Unnamed street'}</strong>
+                          {#if s.kind === 'work'}<strong>{s.name || 'Unnamed street'}</strong>{#if s.side}&nbsp;· {s.side} side{/if}
                           {:else if s.kind === 'walk'}Walk via {s.name || 'path'}
                           {:else}Cut across (no mapped path){/if}
                           <span>{Math.round(s.meters)} m</span>
@@ -453,7 +478,7 @@
                 </li>
               {/each}
             </ul>
-            <p class="hint">Solid lines: hand out flyers. Dashed: just walking. Hover a route to highlight it; click its number to hide it.</p>
+            <p class="hint">Solid lines: hand out flyers (lines drawn beside a street cover just that side). Dashed: just walking. Hover a route to highlight it; click its number to hide it.</p>
           {/if}
         </section>
       {/if}
@@ -507,7 +532,7 @@
         <ol class="streets">
           {#each w.streets as s}
             <li class={s.kind}>
-              {#if s.kind === 'work'}☐ <strong>{s.name || 'Unnamed street'}</strong> — flyers
+              {#if s.kind === 'work'}☐ <strong>{s.name || 'Unnamed street'}</strong> — {s.side ? `${s.side} side` : 'both sides'}
               {:else if s.kind === 'walk'}Walk via {s.name || 'path'}
               {:else}Cut across (no mapped path){/if}
               <span>{Math.round(s.meters)} m</span>

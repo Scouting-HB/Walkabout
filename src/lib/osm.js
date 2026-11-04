@@ -21,8 +21,8 @@ export const STREET_TYPES = [
   { key: 'track', label: 'Tracks / gravel lanes', default: false },
 ];
 
-/** Types busy enough that each side is better walked separately. */
-export const BUSY_TYPES = new Set(['tertiary', 'secondary', 'primary']);
+/** Types busy enough that scouts shouldn't criss-cross them: each side is its own pass. */
+export const BUSY_TYPES = ['tertiary', 'secondary', 'primary'];
 
 const NOT_WALKABLE = new Set([
   'motorway', 'motorway_link', 'trunk', 'trunk_link', 'construction',
@@ -70,11 +70,12 @@ export async function fetchOsm(bbox, { signal, onStatus } = {}) {
 
 /**
  * Build a graph from an Overpass response.
- * Returns { nodes: [{id, lat, lon}], edges: [{a, b, coords, length, name, highway, need, region}] }
- * where a/b index `nodes`, `need` is how many times the edge must be walked (0 = transit only)
- * and `region` is the region index the edge is in (-1 if outside).
+ * Returns { nodes: [{id, lat, lon}], edges: [{a, b, coords, length, name, highway, need, sides, region}] }
+ * where a/b index `nodes`, `need` is 1 if the street must be canvassed (0 = transit only),
+ * `sides` means each side is a separate pass rather than one criss-cross pass, and
+ * `region` is the region index the edge is in (-1 if outside).
  */
-export function buildGraph(osm, regions, { coverTypes, bothSidesBusy = false }) {
+export function buildGraph(osm, regions, { coverTypes, sideTypes = new Set() }) {
   const coords = new Map();
   const ways = [];
   for (const el of osm.elements) {
@@ -109,7 +110,7 @@ export function buildGraph(osm, regions, { coverTypes, bothSidesBusy = false }) 
     const ids = w.nodes.filter((id) => coords.has(id));
     if (ids.length < 2) continue;
     const canCover = coverable(w.tags, coverTypes);
-    const passes = canCover && bothSidesBusy && BUSY_TYPES.has(w.tags.highway) ? 2 : 1;
+    const sides = canCover && sideTypes.has(w.tags.highway);
     const name = w.tags.name || w.tags.ref || '';
 
     // Classify each atomic segment by the region its midpoint falls in.
@@ -137,7 +138,8 @@ export function buildGraph(osm, regions, { coverTypes, bothSidesBusy = false }) 
         length,
         name,
         highway: w.tags.highway,
-        need: region >= 0 ? passes : 0,
+        need: region >= 0 ? 1 : 0,
+        sides: region >= 0 && sides,
         region,
       });
       startI = i;

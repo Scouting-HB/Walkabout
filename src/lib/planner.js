@@ -3,15 +3,20 @@
 //
 // 1. Balanced k-means groups the required street segments into N areas.
 // 2. Start/end points are matched to areas (Hungarian assignment).
-// 3. Each area gets a covering walk: follow unwalked streets where possible,
-//    otherwise take the cheapest path to the nearest unwalked street.
+// 3. Each area gets a covering walk: follow unwalked streets where possible
+//    (keeping to the same street, and on two-sided streets going down one side
+//    and back the other), otherwise take the cheapest path to the nearest
+//    unwalked street.
+//
+// A "unit" of work is a criss-cross street (both sides in one pass) or one
+// side of a two-sided street; the two sides can end up with different walkers.
 // 4. Refinement repeatedly hands boundary streets from the busiest walker to a
 //    lighter neighbour while that lowers the busiest walker's effort.
 //
 // "Effort" is metres walked plus `climbWeight` metres per metre climbed
 // (Naismith's rule is roughly 8).
 
-import { haversine, makeProjector } from './geo.js';
+import { haversine, makeProjector, bearing, compass } from './geo.js';
 
 function mulberry32(seed) {
   return () => {
@@ -93,7 +98,30 @@ class Heap {
   }
 }
 
+/**
+ * Plan routes. Tries several clusterings (different seeds) within the time
+ * budget and keeps the most even result.
+ */
 export function plan(graph, opts = {}, onProgress = () => {}) {
+  const budget = opts.timeBudgetMs ?? 6000;
+  const t0 = Date.now();
+  const score = (r) => r.stats.maxEffort + 0.5 * (r.stats.maxEffort - r.stats.minEffort);
+  let best = null;
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const left = budget - (Date.now() - t0);
+    const r = planOnce(graph, { ...opts, seed: (opts.seed ?? 1) + attempt, timeBudgetMs: Math.max(100, left) }, () => {});
+    if (!r.stats) return r;
+    if (!best || score(r) < score(best)) best = r;
+    const spread = (best.stats.maxEffort - best.stats.minEffort) / best.stats.maxEffort;
+    onProgress({ phase: `Balancing routes (try ${attempt + 1})`, pct: 30 + Math.min(65, ((Date.now() - t0) / budget) * 65), spread });
+    // One walker has nothing to balance; otherwise stop when time is nearly up.
+    if ((opts.walkers ?? 1) <= 1 || Date.now() - t0 > budget * 0.8) break;
+  }
+  best.stats.ms = Date.now() - t0;
+  return best;
+}
+
+function planOnce(graph, opts = {}, onProgress = () => {}) {
   const {
     walkers = 1,
     climbWeight = 8,
@@ -195,8 +223,14 @@ export function plan(graph, opts = {}, onProgress = () => {}) {
       }
     }
   }
-  const req = [];
-  edges.forEach((e, i) => { if (e.need > 0) { req.push(i); compReq[comp[e.a]] += len[i] * e.need; } });
+  // Work units: one per criss-cross street, or one per side of a two-sided street.
+  // req[j] is the unit's edge, side[j] is -1 (both sides in one pass), 0 (left of a→b) or 1 (right of a→b).
+  const req = [], side = [];
+  edges.forEach((e, i) => {
+    if (e.need <= 0) return;
+    if (e.sides) { req.push(i, i); side.push(0, 1); } else { req.push(i); side.push(-1); }
+    compReq[comp[e.a]] += len[i] * (e.sides ? 2 : 1);
+  });
   if (!req.length) {
     return { walkers: [], warnings: ['No streets to canvass were found inside the regions.'], stats: null };
   }
@@ -216,7 +250,7 @@ export function plan(graph, opts = {}, onProgress = () => {}) {
   // ---- clustering -------------------------------------------------------
   const nU = req.length;
   const k = Math.max(1, Math.min(walkers, nU));
-  if (walkers > nU) warnings.push(`Only ${nU} street segments to cover, so only ${nU} walkers get a route.`);
+  if (walkers > nU) warnings.push(`Only ${nU} street pieces to cover, so only ${nU} walkers get a route.`);
   const allPts = [];
   for (const i of req) allPts.push(...edges[i].coords);
   const origin = [allPts.reduce((s, p) => s + p[0], 0) / allPts.length, allPts.reduce((s, p) => s + p[1], 0) / allPts.length];
@@ -229,7 +263,7 @@ export function plan(graph, opts = {}, onProgress = () => {}) {
     const [x0, y0] = proj(c[0]);
     const [x1, y1] = proj(c[c.length - 1]);
     ux[j] = (x + x0 + x1) / 3; uy[j] = (y + y0 + y1) / 3;
-    uw[j] = (len[ei] + climbWeight * (upF[ei] + upB[ei]) / 2) * edges[ei].need + 1;
+    uw[j] = len[ei] + climbWeight * (upF[ei] + upB[ei]) / 2 + 1;
   });
 
   const rnd = mulberry32(seed);
@@ -333,31 +367,34 @@ export function plan(graph, opts = {}, onProgress = () => {}) {
 
   // ---- covering walk ----------------------------------------------------
   const remAt = new Int32Array(V);
-  const remE = new Int32Array(E);
+  const remU = new Uint8Array(nU);
   const reqAt = new Map();
-  for (const ei of req) for (const n of [edges[ei].a, edges[ei].b]) {
-    if (!reqAt.has(n)) reqAt.set(n, []);
-    reqAt.get(n).push(ei);
-  }
-  const unitOfEdge = new Map(req.map((ei, j) => [ei, j]));
+  req.forEach((ei, j) => {
+    for (const n of new Set([edges[ei].a, edges[ei].b])) {
+      if (!reqAt.has(n)) reqAt.set(n, []);
+      reqAt.get(n).push(j);
+    }
+  });
+  // Walking a side in its "canonical" direction keeps the houses on the walker's
+  // left, i.e. facing traffic, and makes out-one-side, back-the-other loops natural.
+  const canonical = (j, cur) => side[j] < 0 || (side[j] === 0 ? edges[req[j]].a === cur : edges[req[j]].b === cur);
 
   function buildRoute(c) {
     const mine = [];
-    for (let j = 0; j < nU; j++) if (assign[j] === c) mine.push(req[j]);
+    for (let j = 0; j < nU; j++) if (assign[j] === c) mine.push(j);
     let left = 0;
-    for (const ei of mine) {
-      const need = edges[ei].need;
-      remE[ei] = need; remAt[edges[ei].a] += need; remAt[edges[ei].b] += need; left += need;
+    for (const j of mine) {
+      const e = edges[req[j]];
+      remU[j] = 1; remAt[e.a]++; remAt[e.b]++; left++;
     }
     let cur = startOf[c];
     const t = endOf[c];
     if (cur < 0) {
       // Begin at the far side from the end point, or at an outer odd-degree corner.
-      const cc = cent[c];
-      const ref = t >= 0 ? nodeXY[t] : cc;
+      const ref = t >= 0 ? nodeXY[t] : cent[c];
       let best = -1, bd = -1;
       for (const odd of [true, false]) {
-        for (const ei of mine) for (const n of [edges[ei].a, edges[ei].b]) {
+        for (const j of mine) for (const n of [edges[req[j]].a, edges[req[j]].b]) {
           if (odd && t < 0 && remAt[n] % 2 === 0) continue;
           const d = Math.hypot(nodeXY[n][0] - ref[0], nodeXY[n][1] - ref[1]);
           if (d > bd) { bd = d; best = n; }
@@ -369,25 +406,33 @@ export function plan(graph, opts = {}, onProgress = () => {}) {
     const first = cur;
     const steps = [];
     const hasWork = (u) => remAt[u] > 0;
+    let lastJ = -1;
     while (left > 0) {
       let take = -1, score = -Infinity;
       if (remAt[cur] > 0) {
-        for (const ei of reqAt.get(cur) ?? []) {
-          if (remE[ei] <= 0) continue;
-          const e = edges[ei];
+        const lastName = lastJ >= 0 ? edges[req[lastJ]].name : '';
+        for (const j of reqAt.get(cur)) {
+          if (!remU[j]) continue;
+          const e = edges[req[j]];
           const other = e.a === cur ? e.b : e.a;
-          const s = deg[other] === 1 ? 1e9 : remAt[other] - (other === cur ? 2 : 1);
-          if (s > score) { score = s; take = ei; }
+          let s = Math.min(remAt[other] - 1, 9); // head toward more work
+          if (deg[other] === 1) s += 1000; // dead end: do it now, there's only one way out
+          if (canonical(j, cur)) s += 100;
+          if (lastName && e.name === lastName) s += 50; // keep following the same street
+          if (lastJ >= 0 && req[j] === req[lastJ]) s -= 20; // turn back only at the street's end
+          if (s > score) { score = s; take = j; }
         }
       }
       if (take >= 0) {
-        const e = edges[take];
+        const ei = req[take], e = edges[ei];
         const dir = e.a === cur ? 0 : 1;
-        steps.push({ e: take, dir, kind: 'work' });
-        remE[take]--; remAt[e.a]--; remAt[e.b]--; left--;
+        steps.push({ e: ei, dir, kind: 'work', side: side[take] });
+        remU[take] = 0; remAt[e.a]--; remAt[e.b]--; left--;
         cur = dir ? e.a : e.b;
+        lastJ = take;
         continue;
       }
+      lastJ = -1;
       const tgt = dijkstra(cur, hasWork);
       if (tgt >= 0) {
         steps.push(...pathSteps(tgt));
@@ -395,7 +440,7 @@ export function plan(graph, opts = {}, onProgress = () => {}) {
       } else {
         // No mapped path: hop straight to the nearest remaining street.
         let best = -1, bd = Infinity;
-        for (const ei of mine) if (remE[ei] > 0) for (const n of [edges[ei].a, edges[ei].b]) {
+        for (const j of mine) if (remU[j]) for (const n of [edges[req[j]].a, edges[req[j]].b]) {
           const d = Math.hypot(nodeXY[n][0] - nodeXY[cur][0], nodeXY[n][1] - nodeXY[cur][1]);
           if (d < bd) { bd = d; best = n; }
         }
@@ -410,8 +455,6 @@ export function plan(graph, opts = {}, onProgress = () => {}) {
       else steps.push({ kind: 'gap', from: cur, to: finish });
       cur = finish;
     }
-    // reset scratch state (all counts are back to 0 already, but be safe)
-    for (const ei of mine) { remE[ei] = 0; remAt[edges[ei].a] = 0; remAt[edges[ei].b] = 0; }
     return { start: first, end: cur, steps, ...measure(steps) };
   }
 
@@ -450,8 +493,8 @@ export function plan(graph, opts = {}, onProgress = () => {}) {
     const cands = new Map();
     for (const j of hUnits) {
       const e = edges[req[j]];
-      for (const n of [e.a, e.b]) for (const ei of reqAt.get(n)) {
-        const c = assign[unitOfEdge.get(ei)];
+      for (const n of [e.a, e.b]) for (const j2 of reqAt.get(n)) {
+        const c = assign[j2];
         if (c !== h && routes[c].effort < routes[h].effort) {
           const key = j * k + c;
           if (!cands.has(key)) cands.set(key, { j, c, d: Math.hypot(ux[j] - hc[0], uy[j] - hc[1]) });
@@ -468,17 +511,25 @@ export function plan(graph, opts = {}, onProgress = () => {}) {
         cands.set(best * k + c, { j: best, c, d: -bd });
       }
     }
-    const list = [...cands.values()].sort((a, b) => routes[a.c].effort - routes[b.c].effort || b.d - a.d).slice(0, 8);
-    let improved = false;
+    const list = [...cands.values()].sort((a, b) => routes[a.c].effort - routes[b.c].effort || b.d - a.d).slice(0, 24);
+    // Also try handing over both sides of a two-sided block together.
+    const moveSets = [];
     for (const { j, c } of list) {
-      assign[j] = c;
+      moveSets.push({ js: [j], c });
+      const twin = side[j] === 0 ? j + 1 : side[j] === 1 ? j - 1 : -1;
+      if (twin >= 0 && assign[twin] === h) moveSets.push({ js: [j, twin], c });
+    }
+    let improved = false;
+    for (const { js, c } of moveSets) {
+      if (js.length >= hUnits.length) continue;
+      for (const j of js) assign[j] = c;
       const nh = buildRoute(h), nc = buildRoute(c);
       if (Math.max(nh.effort, nc.effort) < routes[h].effort - 1) {
         routes[h] = nh; routes[c] = nc;
         improved = true; moves++;
         break;
       }
-      assign[j] = h;
+      for (const j of js) assign[j] = h;
     }
     if (improved) frozen.fill(0); else frozen[h] = 1;
     if (moves % 10 === 0) {
@@ -506,16 +557,28 @@ export function plan(graph, opts = {}, onProgress = () => {}) {
     },
   };
 
+  // Name the side of the street a run of blocks covers, from its overall direction.
+  function sideName(coords, offset) {
+    const a = coords[0], b = coords.at(-1);
+    if (haversine(a, b) < 0.2 * coords.reduce((d, p, i) => (i ? d + haversine(coords[i - 1], p) : 0), 0)) {
+      // Loops (and near-loops): inside or outside instead of a compass point.
+      const xy = coords.map(proj);
+      let area = 0;
+      for (let k = 1; k < xy.length; k++) area += xy[k - 1][0] * xy[k][1] - xy[k][0] * xy[k - 1][1];
+      return (offset > 0) === (area > 0) ? 'inner' : 'outer';
+    }
+    return compass(bearing(a, b) - 90 * offset);
+  }
+
   function describe(r) {
-    // Polyline pieces grouped by kind, plus a street-by-street list.
+    // Polyline pieces grouped by kind (and side), plus a street-by-street list.
     const pieces = [];
     const streets = [];
     const ll = (n) => [nodes[n].lat, nodes[n].lon];
     for (const s of r.steps) {
-      let coords, name, kind = s.kind, meters, climb = 0;
+      let coords, name = '', kind = s.kind, meters, climb = 0, offset = 0;
       if (kind === 'gap') {
         coords = [ll(s.from), ll(s.to)];
-        name = '';
         meters = haversine(coords[0], coords[1]);
       } else {
         const e = edges[s.e];
@@ -523,13 +586,23 @@ export function plan(graph, opts = {}, onProgress = () => {}) {
         name = e.name;
         meters = len[s.e];
         climb = s.dir ? upB[s.e] : upF[s.e];
+        if (kind === 'work' && s.side >= 0) {
+          // +1: the houses being covered are on the walker's left.
+          offset = (s.side === 0) === (s.dir === 0) ? 1 : -1;
+        }
       }
       const last = pieces[pieces.length - 1];
-      if (last && last.kind === kind) last.coords.push(...coords.slice(1));
-      else pieces.push({ kind, coords: [...coords] });
+      if (last && last.kind === kind && last.offset === offset) last.coords.push(...coords.slice(1));
+      else pieces.push({ kind, offset, coords: [...coords] });
       const ls = streets[streets.length - 1];
-      if (ls && ls.kind === kind && ls.name === name) { ls.meters += meters; ls.climb += climb; }
-      else streets.push({ kind, name, meters, climb });
+      // A new line starts on a new street, or when the walker turns back onto the other side of the same block.
+      if (ls && ls.kind === kind && ls.name === name && ls.offset === offset && s.e !== ls.lastE) {
+        ls.meters += meters; ls.climb += climb; ls.lastE = s.e; ls.coords.push(...coords.slice(1));
+      } else streets.push({ kind, name, meters, climb, offset, lastE: s.e, coords: [...coords] });
+    }
+    for (const st of streets) {
+      st.side = st.offset ? sideName(st.coords, st.offset) : null;
+      delete st.coords; delete st.lastE;
     }
     return {
       start: r.start >= 0 ? ll(r.start) : null,

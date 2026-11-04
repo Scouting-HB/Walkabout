@@ -39,6 +39,39 @@ export function makeProjector([lat0, lon0]) {
   return (p) => [(p[1] - lon0) * kx, (p[0] - lat0) * ky];
 }
 
+export function makeUnprojector([lat0, lon0]) {
+  const kx = (Math.PI / 180) * R * Math.cos(rad(lat0));
+  const ky = (Math.PI / 180) * R;
+  return ([x, y]) => [lat0 + y / ky, lon0 + x / kx];
+}
+
+/** Shift a polyline sideways by `m` metres (positive = left of travel direction). */
+export function offsetLine(coords, m) {
+  if (!m || coords.length < 2) return coords;
+  const proj = makeProjector(coords[0]);
+  const unproj = makeUnprojector(coords[0]);
+  const pts = coords.map(proj);
+  const n = pts.length;
+  return pts.map((p, i) => {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
+    let dx = b[0] - a[0], dy = b[1] - a[1];
+    const l = Math.hypot(dx, dy) || 1;
+    dx /= l; dy /= l;
+    return unproj([p[0] - dy * m, p[1] + dx * m]);
+  });
+}
+
+/** Initial bearing from a to b in degrees clockwise from north. */
+export function bearing(a, b) {
+  const y = Math.sin(rad(b[1] - a[1])) * Math.cos(rad(b[0]));
+  const x = Math.cos(rad(a[0])) * Math.sin(rad(b[0])) - Math.sin(rad(a[0])) * Math.cos(rad(b[0])) * Math.cos(rad(b[1] - a[1]));
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+/** Nearest of north/east/south/west for a bearing. */
+export function compass(deg) {
+  return ['north', 'east', 'south', 'west'][Math.round((((deg % 360) + 360) % 360) / 90) % 4];
+}
+
 export function bboxOf(points) {
   let s = Infinity, w = Infinity, n = -Infinity, e = -Infinity;
   for (const [lat, lon] of points) {

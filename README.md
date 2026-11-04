@@ -39,10 +39,24 @@ browser automatically, and **Save project file** writes a copy you can share.
   matches start/end points to the areas (Hungarian assignment), builds a
   covering walk for each area, and then keeps handing boundary streets from the
   hardest route to a lighter neighbour while that makes the hardest route
-  easier.
+  easier. It repeats this from several different starting splits and keeps the
+  most even result.
 - Walking between streets and to/from start and end points counts toward
-  effort unless you turn that off under *More options*. There you can also
-  have both sides of busier roads walked separately.
+  effort unless you turn that off under *More options*.
+
+### Sides of the street
+
+Every street type is either **criss-cross**, where one pass covers both sides
+(fine on quiet residential streets), or **two-sided**, where each side is its
+own piece of work. Two-sided pieces are balanced independently, so one walker
+may take the north side of a road and another the south side. A walker who
+has both sides goes down one side to the end of the street and back up the
+other. Walking a side in its preferred direction keeps the houses on the
+walker's left, which means facing traffic. Street lists say which side
+("Oak St · north side"), and the map draws side passes just off the
+centreline. Pick *Criss-cross all*, *Busy roads two-sided* (the default:
+tertiary and larger) or *All two-sided*, or mix per street type under
+*More options*.
 
 Solid lines on the map are where to hand out flyers. Dashed lines are just
 walking.

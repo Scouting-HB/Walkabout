@@ -3,6 +3,7 @@
   import 'leaflet/dist/leaflet.css';
   import { onMount } from 'svelte';
   import { DEN, routeColor } from './palette.js';
+  import { offsetLine } from './geo.js';
 
   let {
     mode = 'none',
@@ -29,6 +30,7 @@
   let map = $state(null);
   let layers = {};
   let draft = $state([]);
+  let zoom = $state(14);
 
   onMount(() => {
     map = L.map(el, { zoomControl: true }).setView([38.4496, -78.8689], 14);
@@ -36,6 +38,7 @@
       maxZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(map);
+    map.on('zoomend', () => (zoom = map.getZoom()));
     for (const k of ['preview', 'regions', 'routes', 'edit', 'draft', 'points']) layers[k] = L.layerGroup().addTo(map);
 
     map.on('click', (e) => {
@@ -170,14 +173,19 @@
     if (!map) return;
     const g = layers.routes;
     g.clearLayers();
+    // Side-of-street passes are drawn a few pixels off the centreline, on their side.
+    const lat = map.getCenter().lat;
+    const mPerPx = (156543.03 * Math.cos((lat * Math.PI) / 180)) / 2 ** zoom;
     walkers.forEach((w, i) => {
       if (hidden.includes(i)) return;
       const faded = focusWalker >= 0 && focusWalker !== i;
       const color = routeColor(i);
       for (const p of w.pieces) {
         if (p.kind === 'work') {
-          L.polyline(p.coords, { color: '#1b1b1b', weight: 8, opacity: faded ? 0.08 : 0.55, interactive: false }).addTo(g);
-          L.polyline(p.coords, { color, weight: 5, opacity: faded ? 0.25 : 1 })
+          const coords = p.offset ? offsetLine(p.coords, p.offset * 4.5 * mPerPx) : p.coords;
+          const wgt = p.offset ? 4 : 5;
+          L.polyline(coords, { color: '#1b1b1b', weight: wgt + 3, opacity: faded ? 0.08 : 0.55, interactive: false }).addTo(g);
+          L.polyline(coords, { color, weight: wgt, opacity: faded ? 0.25 : 1 })
             .bindTooltip(`Walker ${i + 1}`, { sticky: true })
             .addTo(g);
         } else {
