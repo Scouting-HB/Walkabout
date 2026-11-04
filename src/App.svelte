@@ -1,5 +1,6 @@
 <script>
   import MapView from './lib/MapView.svelte';
+  import Step from './lib/Step.svelte';
   import { fetchOsm, buildGraph, STREET_TYPES, BUSY_TYPES } from './lib/osm.js';
   import { addElevations, clearElevations } from './lib/elevation.js';
   import { bboxOf, padBbox, ringAreaM2 } from './lib/geo.js';
@@ -519,11 +520,9 @@
                   <div class="bar"><div style:width="{(w.effort / result.stats.maxEffort) * 100}%" style:background={routeColor(i)}></div></div>
                   {#if openWalker === i}
                     <ol class="streets">
-                      {#each w.streets as s}
+                      {#each w.streets as s, k}
                         <li class={s.kind}>
-                          {#if s.kind === 'work'}<strong>{s.name || 'Unnamed street'}</strong>{#if s.side}&nbsp;· {s.side} side{/if}
-                          {:else if s.kind === 'walk'}Walk via {s.name || 'path'}
-                          {:else}Cut across (no mapped path){/if}
+                          <Step {s} prev={w.streets[k - 1]} />
                           <span>{short(s.meters)}</span>
                         </li>
                       {/each}
@@ -588,11 +587,9 @@
           {#if w.end}· End: {w.end[0].toFixed(5)}, {w.end[1].toFixed(5)}{/if}
         </p>
         <ol class="streets">
-          {#each w.streets as s}
+          {#each w.streets as s, k}
             <li class={s.kind}>
-              {#if s.kind === 'work'}☐ <strong>{s.name || 'Unnamed street'}</strong> — {s.side ? `${s.side} side` : 'both sides'}
-              {:else if s.kind === 'walk'}Walk via {s.name || 'path'}
-              {:else}Cut across (no mapped path){/if}
+              {#if s.kind === 'work'}☐ {/if}<Step {s} prev={w.streets[k - 1]} />
               <span>{short(s.meters)}</span>
             </li>
           {/each}

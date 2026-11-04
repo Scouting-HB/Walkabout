@@ -67,7 +67,7 @@ export function walkerPayload(w, index, title) {
     lb: w.label,
     L: Math.round(w.length), W: Math.round(w.work), U: Math.round(w.up), D: Math.round(w.down),
     s: r5(w.start), e: r5(w.end),
-    S: w.streets.map((s) => [KINDS.indexOf(s.kind), s.name || '', Math.round(s.meters), s.side || '']),
+    S: w.streets.map((s) => [KINDS.indexOf(s.kind), s.name || '', Math.round(s.meters), s.side || '', s.turn || '', s.heading || '', s.crossBefore ?? [], s.crossing ?? []]),
     P: w.pieces.map((p) => [KINDS.indexOf(p.kind), p.offset || 0, encodePolyline(p.coords)]),
   };
 }
@@ -82,7 +82,7 @@ export function walkerFromPayload(d) {
       label: d.lb || `Walker ${d.i + 1}`,
       length: d.L, work: d.W, up: d.U, down: d.D,
       start: d.s ?? null, end: d.e ?? null,
-      streets: d.S.map(([k, name, meters, side]) => ({ kind: KINDS[k], name, meters, side })),
+      streets: d.S.map(([k, name, meters, side, turn, heading, crossBefore, crossing]) => ({ kind: KINDS[k], name, meters, side, turn, heading, crossBefore, crossing })),
       pieces: d.P.map(([k, offset, line]) => ({ kind: KINDS[k], offset, coords: decodePolyline(line) })),
     },
   };

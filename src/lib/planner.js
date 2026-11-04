@@ -17,6 +17,7 @@
 // (Naismith's rule is roughly 8).
 
 import { haversine, makeProjector, bearing, compass } from './geo.js';
+import { junction } from './directions.js';
 
 function mulberry32(seed) {
   return () => {
@@ -577,11 +578,20 @@ function planOnce(graph, opts = {}, onProgress = () => {}) {
     return compass(bearing(a, b) - 90 * offset);
   }
 
+  function pointAlong(coords, d) {
+    for (let i = 1; i < coords.length; i++) {
+      d -= haversine(coords[i - 1], coords[i]);
+      if (d <= 0) return coords[i];
+    }
+    return coords.at(-1);
+  }
+
   function describe(r) {
     // Polyline pieces grouped by kind (and side), plus a street-by-street list.
     const pieces = [];
     const streets = [];
     const ll = (n) => [nodes[n].lat, nodes[n].lon];
+    let prev = null; // previous edge step, for turn directions
     for (const s of r.steps) {
       let coords, name = '', kind = s.kind, meters, climb = 0, offset = 0;
       if (kind === 'gap') {
@@ -601,11 +611,33 @@ function planOnce(graph, opts = {}, onProgress = () => {}) {
       const last = pieces[pieces.length - 1];
       if (last && last.kind === kind && last.offset === offset) last.coords.push(...coords.slice(1));
       else pieces.push({ kind, offset, coords: [...coords] });
+
+      let move = null;
+      if (kind !== 'gap' && prev) {
+        const n = s.dir ? edges[s.e].b : edges[s.e].a;
+        const arms = [];
+        for (let k = adjStart[n]; k < adjStart[n + 1]; k++) {
+          const ae = edges[adjEdge[k]];
+          arms.push({ coords: adjDir[k] ? [...ae.coords].reverse() : ae.coords, name: ae.name, highway: ae.highway, walked: adjEdge[k] === s.e || adjEdge[k] === prev.e });
+        }
+        move = junction({ inCoords: prev.coords, inOffset: prev.offset, outCoords: coords, outOffset: offset, arms });
+      }
+      prev = kind === 'gap' ? null : { coords, offset, e: s.e };
+
       const ls = streets[streets.length - 1];
       // A new line starts on a new street, or when the walker turns back onto the other side of the same block.
       if (ls && ls.kind === kind && ls.name === name && ls.offset === offset && s.e !== ls.lastE) {
         ls.meters += meters; ls.climb += climb; ls.lastE = s.e; ls.coords.push(...coords.slice(1));
-      } else streets.push({ kind, name, meters, climb, offset, lastE: s.e, coords: [...coords] });
+        if (move) ls.crossing.push(...move.cross);
+      } else {
+        streets.push({
+          kind, name, meters, climb, offset, lastE: s.e, coords: [...coords],
+          turn: move ? move.turn : 'start',
+          heading: move || kind === 'gap' ? undefined : compass(bearing(coords[0], pointAlong(coords, 30))),
+          crossBefore: move ? move.cross : [],
+          crossing: [],
+        });
+      }
     }
     for (const st of streets) {
       st.side = st.offset ? sideName(st.coords, st.offset) : null;

@@ -2,6 +2,7 @@
   // Read-only view of one walker's route, opened from a #walk=… share link.
   import { onDestroy } from 'svelte';
   import MapView from './lib/MapView.svelte';
+  import Step from './lib/Step.svelte';
   import { toGpx, download } from './lib/gpx.js';
   import { routeColor } from './lib/palette.js';
   import { unpack, walkerFromPayload } from './lib/share.js';
@@ -130,11 +131,11 @@
                 {#if s.kind === 'work'}
                   <label>
                     <input type="checkbox" checked={done.includes(i)} onchange={() => toggleDone(i)} />
-                    <span class="what"><strong>{s.name || 'Unnamed street'}</strong>, {s.side ? `${s.side} side` : 'both sides'}</span>
+                    <span class="what"><Step {s} prev={w.streets[i - 1]} /></span>
                     <span>{short(s.meters)}</span>
                   </label>
                 {:else}
-                  <span class="what">{s.kind === 'walk' ? `Walk via ${s.name || 'path'}` : 'Cut across (no mapped path)'}</span>
+                  <span class="what"><Step {s} prev={w.streets[i - 1]} /></span>
                   <span>{short(s.meters)}</span>
                 {/if}
               </li>
@@ -169,11 +170,9 @@
       <h1><span class="swatch big" style:background={w.color}>{route.index + 1}</span> {route.title || 'Walkabout'} · {w.label}</h1>
       <p>{dist(w.length)} · climb {short(w.up)} · about {hm(minutes(w))}</p>
       <ol class="streets">
-        {#each w.streets as s}
+        {#each w.streets as s, k}
           <li class={s.kind}>
-            {#if s.kind === 'work'}☐ <strong>{s.name || 'Unnamed street'}</strong>, {s.side ? `${s.side} side` : 'both sides'}
-            {:else if s.kind === 'walk'}Walk via {s.name || 'path'}
-            {:else}Cut across (no mapped path){/if}
+            {#if s.kind === 'work'}☐ {/if}<Step {s} prev={w.streets[k - 1]} />
             <span>{short(s.meters)}</span>
           </li>
         {/each}
