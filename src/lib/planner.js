@@ -62,6 +62,8 @@ export function hungarian(cost) {
   return res;
 }
 
+const CLIMB_NOISE = 1.5; // metres
+
 class Heap {
   constructor() { this.k = []; this.v = []; }
   get size() { return this.k.length; }
@@ -145,10 +147,15 @@ function planOnce(graph, opts = {}, onProgress = () => {}) {
     const e = edges[i];
     len[i] = e.length;
     if (e.elev) {
+      // Count climb with a little hysteresis so DEM noise (trees, roofs) doesn't add up.
+      let ref = e.elev[0];
       for (let j = 1; j < e.elev.length; j++) {
-        const d = e.elev[j] - e.elev[j - 1];
-        if (d > 0) upF[i] += d; else upB[i] -= d;
+        const d = e.elev[j] - ref;
+        if (d > CLIMB_NOISE) { upF[i] += d; ref = e.elev[j]; }
+        else if (d < -CLIMB_NOISE) { upB[i] -= d; ref = e.elev[j]; }
       }
+      const d = e.elev[e.elev.length - 1] - ref; // settle the remainder so up - down = net change
+      if (d > 0) upF[i] += d; else upB[i] -= d;
     }
     costF[i] = len[i] + climbWeight * upF[i];
     costB[i] = len[i] + climbWeight * upB[i];

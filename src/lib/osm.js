@@ -1,13 +1,13 @@
 // Fetch walkable streets from OpenStreetMap (Overpass) and turn them into a
 // routing graph whose edges run between intersections.
 
-import { haversine, regionOf } from './geo.js';
+import { haversine, regionOf, pointInRing } from './geo.js';
+import { OVERPASS_MIRROR, OVERPASS_PUBLIC, OVERPASS_MIRROR_COVERAGE } from './servers.js';
 
-const OVERPASS = [
-  'https://overpass-api.de/api/interpreter',
-  'https://overpass.private.coffee/api/interpreter',
-  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
-];
+/** The mirror only holds its extract, so use it only when the whole bbox is inside. */
+export function mirrorCovers({ s, w, n, e }) {
+  return [[s, w], [s, e], [n, w], [n, e]].every((p) => pointInRing(p, OVERPASS_MIRROR_COVERAGE));
+}
 
 /** Highway types people might want to canvass, in display order. */
 export const STREET_TYPES = [
@@ -50,7 +50,8 @@ export async function fetchOsm(bbox, { signal, onStatus } = {}) {
   const { s, w, n, e } = bbox;
   const q = `[out:json][timeout:120];way["highway"](${s},${w},${n},${e});out body;>;out skel qt;`;
   let lastErr;
-  for (const url of OVERPASS) {
+  const urls = mirrorCovers(bbox) ? [OVERPASS_MIRROR, ...OVERPASS_PUBLIC] : OVERPASS_PUBLIC;
+  for (const url of urls) {
     try {
       onStatus?.(`Downloading streets from ${new URL(url).host}…`);
       const res = await fetch(url, {
@@ -59,7 +60,10 @@ export async function fetchOsm(bbox, { signal, onStatus } = {}) {
         signal,
       });
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      return await res.json();
+      const data = await res.json();
+      // An empty answer from the mirror more likely means missing data than an empty area.
+      if (url === OVERPASS_MIRROR && !data.elements?.length) throw new Error('mirror returned no data');
+      return data;
     } catch (err) {
       if (signal?.aborted) throw err;
       lastErr = err;

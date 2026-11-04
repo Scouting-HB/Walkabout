@@ -28,12 +28,33 @@ street-by-street list, and a GPX download for phone apps. **Print route
 sheets** prints one checklist page per walker. Your work is saved in the
 browser automatically, and **Save project file** writes a copy you can share.
 
+### Sharing links
+
+- **🔗 on a walker's card** (or **Copy walker links** for everyone at once)
+  makes a link that opens just that walker's route. It shows the route on a map,
+  a "show where I am" dot, a street checklist that the phone remembers as they
+  tick streets off, and GPX and print buttons. Nothing gets replanned: the link
+  carries the route itself, about 2–3 KB for a 13 km route.
+- **Share setup link** carries the regions, start and end points and settings,
+  so another leader can open them in the planner and plan again.
+
+Both keep their data after the `#` in the URL, so it never reaches a server.
+
 ## How routes are balanced
 
 - Streets come from OpenStreetMap through the Overpass API. By default it covers
   residential, living, unclassified, tertiary and secondary streets that fall
   inside your regions. Other walkable ways are used only for getting around.
-- Elevation comes from the Open-Meteo elevation API (Copernicus 90 m DEM).
+- Elevation comes from the Copernicus DEM: 30 m resolution from the mirror
+  described below, or 90 m from the Open-Meteo API.
+- **Mirrors.** For Virginia and its neighbours, the app first tries
+  self-hosted mirrors: `overpass.mirror.mhciael.com` (Geofabrik's US South
+  extract, roads only, updated hourly) and `elevation.mirror.mhciael.com`
+  (OpenTopoData, Copernicus 30 m, lat 33–41° N, lon 75–91° W). Anywhere else,
+  or if a mirror is down, it uses the public servers. The mirrors only answer
+  pages served from `scouting-hb.github.io`, `walkabout.mhciael.com` or
+  `localhost`, and they are rate-limited per visitor. The URLs and coverage are
+  set in `src/lib/servers.js`.
 - *Effort* = metres walked + *N* × metres climbed (*N* = 8 by default, roughly
   Naismith's rule). The planner splits the streets with a balanced k-means,
   matches start/end points to the areas (Hungarian assignment), builds a

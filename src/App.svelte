@@ -5,6 +5,7 @@
   import { bboxOf, padBbox, ringAreaM2 } from './lib/geo.js';
   import { toGpx, download } from './lib/gpx.js';
   import { REGION_COLORS, routeColor } from './lib/palette.js';
+  import { pack, unpack, walkerPayload, setupPayload, setupFromPayload, shareUrl, readHash, sendLink } from './lib/share.js';
 
   const STORE = 'walkabout:project:v1';
   const defaults = {
@@ -63,6 +64,62 @@
   let searchResults = $state([]);
   let abort = null;
   let worker = null;
+  let notice = $state('');
+  let noticeTimer;
+  function flash(msg) {
+    notice = msg;
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => (notice = ''), 4000);
+  }
+
+  // Opened from a #setup=… link: load the shared regions, points and settings.
+  const incoming = readHash();
+  if (incoming?.kind === 'setup') {
+    history.replaceState(null, '', location.pathname + location.search);
+    unpack(incoming.data)
+      .then((d) => {
+        const setup = setupFromPayload(d);
+        const same = JSON.stringify(setupPayload(p)) === JSON.stringify(setupPayload({ ...p, ...setup }));
+        if (same) return flash('That setup is already loaded.');
+        if (p.regions.length && !confirm('Replace your current regions, points and settings with the shared setup?')) return;
+        p = { ...defaults, ...setup };
+        result = null;
+        preview = [];
+        fitKey++;
+        flash('Loaded the shared setup. Press Plan to make routes.');
+      })
+      .catch((err) => (error = `Could not open that setup link: ${err.message}`));
+  }
+
+  async function linkFor(w, i) {
+    return shareUrl('walk', await pack(walkerPayload(w, i, p.title)));
+  }
+  async function shareWalker(w, i) {
+    try {
+      const how = await sendLink(await linkFor(w, i), `${w.label}${p.title ? ` · ${p.title}` : ''}`);
+      if (how === 'copied') flash(`Copied ${w.label}'s route link. Send it to them; it opens just their route.`);
+    } catch (err) {
+      error = `Could not make the link: ${err.message}`;
+    }
+  }
+  async function copyAllLinks() {
+    try {
+      const lines = [];
+      for (const [i, w] of result.walkers.entries()) lines.push(`${w.label}: ${await linkFor(w, i)}`);
+      await navigator.clipboard.writeText(`${p.title ? `${p.title}\n\n` : ''}${lines.join('\n\n')}\n`);
+      flash(`Copied ${lines.length} route links, one per walker.`);
+    } catch (err) {
+      error = `Could not copy the links: ${err.message}`;
+    }
+  }
+  async function shareSetup() {
+    try {
+      const how = await sendLink(shareUrl('setup', await pack(setupPayload($state.snapshot(p)))), p.title || 'Walkabout setup');
+      if (how === 'copied') flash('Copied the setup link. It opens these regions, points and settings in the planner.');
+    } catch (err) {
+      error = `Could not make the link: ${err.message}`;
+    }
+  }
 
   // Cached street graph, keyed by what it depends on.
   let graphCache = { key: '', graph: null, elevated: false };
@@ -444,6 +501,7 @@
               <button class="btn" onclick={() => download(`${fileBase}-all.gpx`, toGpx(result.walkers, p.title || 'Walkabout routes'))}>All routes (GPX)</button>
               <button class="btn" onclick={() => window.print()}>Print route sheets</button>
               <button class="btn" onclick={exportGeoJson}>GeoJSON</button>
+              <button class="btn" onclick={copyAllLinks} title="One link per walker, ready to paste into a group text or email">Copy walker links</button>
             </div>
             <ul class="walkers">
               {#each result.walkers as w, i}
@@ -459,6 +517,7 @@
                       <span>↑{Math.round(w.up)} m ↓{Math.round(w.down)} m</span>
                       <span>≈ {hm(minutes(w))}</span>
                     </div>
+                    <button class="icon" title="Send this walker a link to their route" onclick={() => shareWalker(w, i)}>🔗</button>
                     <button class="icon" title="Download GPX" onclick={() => download(`${fileBase}-walker-${i + 1}.gpx`, toGpx([w], w.label))}>⤓</button>
                     <button class="icon" title="Street list" onclick={() => (openWalker = openWalker === i ? -1 : i)}>{openWalker === i ? '▴' : '▾'}</button>
                   </div>
@@ -478,6 +537,7 @@
                 </li>
               {/each}
             </ul>
+            <p class="hint">🔗 sends a walker a link that opens just their route, with a street checklist and a “where am I” dot. Nothing is replanned.</p>
             <p class="hint">Solid lines: hand out flyers (lines drawn beside a street cover just that side). Dashed: just walking. Hover a route to highlight it; click its number to hide it.</p>
           {/if}
         </section>
@@ -488,12 +548,15 @@
         <div class="row">
           <button class="btn" onclick={exportProject}>Save project file</button>
           <label class="btn file">Open project<input type="file" accept=".json" onchange={importFile} hidden /></label>
+          <button class="btn" onclick={shareSetup} disabled={!p.regions.length} title="A link that opens these regions, points and settings in the planner">Share setup link</button>
           <button class="btn danger" onclick={clearAll}>Clear</button>
         </div>
-        <p class="hint">Your work is kept in this browser automatically. Streets © OpenStreetMap contributors; elevation by Open-Meteo.</p>
+        <p class="hint">Your work is kept in this browser automatically. Streets © OpenStreetMap contributors; elevation from Copernicus DEM via self-hosted mirrors or Open-Meteo.</p>
       </section>
     </div>
   </aside>
+
+  {#if notice}<div class="toast" role="status">{notice}</div>{/if}
 
   <main class="mapcol">
     <MapView

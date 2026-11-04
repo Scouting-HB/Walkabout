@@ -137,3 +137,10 @@ details summary { cursor: pointer; font-size: 0.88rem; color: var(--cub-blue); m
   .sheet .swatch.big { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .sheet .streets { font-size: 11pt; columns: 2; }
 }
+
+.toast {
+  position: fixed; z-index: 2000; left: 50%; bottom: 20px; transform: translateX(-50%);
+  max-width: min(480px, calc(100% - 32px)); background: var(--cub-blue); color: #fff;
+  padding: 10px 14px; border-radius: 8px; box-shadow: 0 2px 12px rgb(0 0 0 / 0.35); font-size: 0.9rem;
+}
+@media print { .toast { display: none; } }

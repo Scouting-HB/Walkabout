@@ -18,6 +18,8 @@
     hidden = [],
     fitKey = 0,
     focus = null,
+    me = null,
+    editable = true,
     onRegionDone = () => {},
     onRegionEdit = () => {},
     onSelectRegion = () => {},
@@ -39,7 +41,7 @@
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(map);
     map.on('zoomend', () => (zoom = map.getZoom()));
-    for (const k of ['preview', 'regions', 'routes', 'edit', 'draft', 'points']) layers[k] = L.layerGroup().addTo(map);
+    for (const k of ['preview', 'regions', 'routes', 'edit', 'draft', 'points', 'me']) layers[k] = L.layerGroup().addTo(map);
 
     map.on('click', (e) => {
       const p = [e.latlng.lat, e.latlng.lng];
@@ -142,16 +144,16 @@
     const g = layers.points;
     g.clearLayers();
     const add = (kind, p, i) => {
-      const label = paired ? `${i + 1}` : `${kind === 'start' ? 'S' : 'E'}${i + 1}`;
+      const label = !editable ? (kind === "start" ? "S" : "E") : paired ? `${i + 1}` : `${kind === "start" ? "S" : "E"}${i + 1}`;
       const m = L.marker(p, {
-        draggable: true,
+        draggable: editable,
         icon: L.divIcon({
           className: `pt-marker pt-${kind}`,
           html: `<span>${label}</span>`,
           iconSize: [28, 28],
           iconAnchor: [14, 14],
         }),
-        title: `${kind === 'start' ? 'Start' : 'End'} ${i + 1} (drag to move)`,
+        title: `${kind === 'start' ? 'Start' : 'End'}${editable ? ` ${i + 1} (drag to move)` : ''}`,
       }).addTo(g);
       m.on('dragend', () => { const ll = m.getLatLng(); onMovePoint(kind, i, [ll.lat, ll.lng]); });
     };
@@ -179,7 +181,7 @@
     walkers.forEach((w, i) => {
       if (hidden.includes(i)) return;
       const faded = focusWalker >= 0 && focusWalker !== i;
-      const color = routeColor(i);
+      const color = w.color ?? routeColor(i);
       for (const p of w.pieces) {
         if (p.kind === 'work') {
           const coords = p.offset ? offsetLine(p.coords, p.offset * 4.5 * mPerPx) : p.coords;
@@ -199,6 +201,17 @@
         }
       }
     });
+  });
+
+  // the viewer's own position ({ lat, lon, accuracy } from the Geolocation API)
+  $effect(() => {
+    if (!map) return;
+    const g = layers.me;
+    g.clearLayers();
+    if (!me) return;
+    const ll = [me.lat, me.lon];
+    if (me.accuracy > 15) L.circle(ll, { radius: me.accuracy, color: '#1a73e8', weight: 1, fillOpacity: 0.12, interactive: false }).addTo(g);
+    L.circleMarker(ll, { radius: 8, color: '#fff', weight: 3, fillColor: '#1a73e8', fillOpacity: 1, interactive: false }).addTo(g);
   });
 
   $effect(() => {
