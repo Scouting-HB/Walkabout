@@ -4,7 +4,7 @@ Plan evenly balanced walking routes for scouts canvassing neighborhoods: for
 example, handing out flyers that ask residents to leave food on their porch,
 then coming back a week later to collect it.
 
-**Live app:** https://scouting-hb.github.io/Walkabout/
+**Live app:** https://walkabout.mhciael.com/ (GitHub Pages custom domain; the old scouting-hb.github.io/Walkabout/ address redirects there)
 
 Everything runs in the browser. There is no server and no account.
 
